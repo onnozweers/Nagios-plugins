@@ -1,0 +1,54 @@
+#!/bin/bash
+# Onno Zweers, juni 2008
+#
+# Description:
+#
+# This plugin checks when the last backup was made with TSM and warns if it was too long ago.
+#
+
+# Nagios return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+STATE_DEPENDENT=4
+
+CHECK_NAME="KERNEL"
+
+PROGNAME=`basename $0`
+
+# Check if grep supports --only-matching.
+if ! grep --help | grep -- '--only-matching' &> /dev/null ; then
+    echo "UNKNOWN - This version of grep does not support --only-matching."
+    exit $STATE_UNKNOWN
+fi
+
+RUNNING_KERNEL=`uname -r | sed 's/.el[56].*//' | grep -o '[0-9].*[0-9]'`
+LATEST_KERNEL=`rpm -qa | \
+               grep '^kernel-[[:digit:]]' | \
+               sed 's/\.x86_64//' | \
+               sed 's/\.el[56]//' | \
+               grep -o '[0-9].*[0-9]' | \
+               sed 's/2.6.32-71$/2.6.32-71.00.0/' | \
+               sed 's/\.\([0-9]\)$/.0\1/' | \
+               sed 's/\.\([0-9]\.\)/.0\1/g' | \
+               sed 's/-\([0-9][0-9]\.\)/-0\1/' | \
+               sort -n | \
+               tail -n 1 | \
+               sed 's/-0\([0-9][0-9]\.\)/-\1/' | \
+               sed 's/\.0\([0-9]\.\)/.\1/g' | \
+               sed 's/\.0\([0-9]\)$/.\1/' `
+
+
+if [ "$RUNNING_KERNEL" = "$LATEST_KERNEL" ] ; then
+    echo "OK - Running kernel: `uname -r`; available kernels: `rpm -qa | grep '^kernel-[[:digit:]].*' | sort -n | tr '\n' ' ' | sed 's/ k/ - k/g'`."
+    exit $STATE_OK
+else
+    if [ "$1" = "--warn-only" ] ; then
+        echo "$CHECK_NAME WARNING - Latest kernel: $LATEST_KERNEL; running kernel: $RUNNING_KERNEL."
+        exit $STATE_WARNING
+    else
+        echo "$CHECK_NAME CRITICAL - Latest kernel: $LATEST_KERNEL; running kernel: $RUNNING_KERNEL."
+        exit $STATE_CRITICAL
+    fi
+fi

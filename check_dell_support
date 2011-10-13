@@ -1,0 +1,81 @@
+#!/bin/bash
+# Onno Zweers, 2011-10-04
+#
+# Description:
+#
+# This plugin checks how many days a Dell host is supported.
+#
+
+# Nagios return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+STATE_DEPENDENT=4
+
+CHECK_NAME="DELL SUPPORT"
+
+PROGNAME=`basename $0`
+
+# Check some commands that we need
+/usr/bin/which dmidecode 2>&1 1>/dev/null || exit $STATE_UNKNOWN
+/usr/bin/which lynx      2>&1 1>/dev/null || exit $STATE_UNKNOWN
+/usr/bin/which perl      2>&1 1>/dev/null || exit $STATE_UNKNOWN
+
+
+# Set defaults
+WARNING_DAYS=90
+CRITICAL_DAYS=30
+
+# Collect arguments
+while getopts w:c:s: OPT $@; do
+  case $OPT in
+    w) # warning if less then n days
+      WARNING_DAYS=$OPTARG
+      ;;
+    c) # critical if less than n days
+      CRITICAL_DAYS=$OPTARG
+      ;;
+    s) # specify serial number manually (if not, it's automatic)
+      POWEREDGE_SERIAL_NUMBERS="$OPTARG"
+      ;;
+  esac
+done
+
+if [ -z "$POWEREDGE_SERIAL_NUMBERS" ] ; then
+  # This host can have several serial numbers (blade & chassis)
+  POWEREDGE_SERIAL_NUMBERS=`dmidecode | grep -2 PowerEdge | grep Serial | sed -e 's/.*Serial Number: //'`
+  if [ -z "$POWEREDGE_SERIAL_NUMBERS" ] ; then
+    echo "$CHECK_NAME UNKNOWN - Unable to get serial number with dmidecode. Am I running as root? Fix me or try specifying it with -s."
+    exit $STATE_UNKNOWN
+  fi
+fi
+
+ADDITIONAL_INFO="Checked serial numbers:"
+for SERIAL in $POWEREDGE_SERIAL_NUMBERS ; do
+  ADDITIONAL_INFO="$ADDITIONAL_INFO <a href='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL'>$SERIAL</a>"
+done
+
+for SERIAL in $POWEREDGE_SERIAL_NUMBERS ; do
+  SUPPORT_LINES=`lynx -width=200 -dump http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL | grep -4 'Days Left' | tail -n +6  | grep DELL`
+  if [ -z "$SUPPORT_LINES" ] ; then
+    echo "$CHECK_NAME UNKNOWN - Unable to get support information. Check http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL"
+    exit $STATE_UNKNOWN
+  fi
+  DAYS_LEFT=`echo "$SUPPORT_LINES" | awk '{print $NF}' | sort -n | tail -n 1`
+  # Collect info to display, format "line 1 - line 2"
+  SUPPORT_INFO_TMP=`echo -e "$SUPPORT_LINES" | perl -p -e 's/\s+$/ - /g' | sed -e 's/ - $//'`
+  SUPPORT_INFO=`echo $SUPPORT_INFO_TMP`
+  # Determine status
+  if [ $DAYS_LEFT -lt $CRITICAL_DAYS ] ; then
+    echo "$CHECK_NAME CRITICAL - $DAYS_LEFT days of support left for <a href='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO"
+    exit $STATE_CRITICAL
+  fi
+  if [ $DAYS_LEFT -lt $WARNING_DAYS ] ; then
+    echo "$CHECK_NAME WARNING - $DAYS_LEFT days of support left for <a href='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO"
+    exit $STATE_WARNING
+  fi
+done
+
+echo "$CHECK_NAME OK - $DAYS_LEFT days of support left for <a href='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO"
+exit $STATE_OK

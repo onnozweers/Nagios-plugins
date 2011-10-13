@@ -1,0 +1,114 @@
+#!/bin/bash
+# Onno Zweers, 2011-10-06
+#
+# Description:
+# Check if dCache cells are offline.
+#
+
+# Nagios return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+STATE_DEPENDENT=4
+
+CHECK_NAME="DCACHE"
+
+PROGNAME=`basename $0`
+
+# Check some commands that we need
+/usr/bin/which lynx  2>&1 1>/dev/null || exit $STATE_UNKNOWN
+/usr/bin/which perl  2>&1 1>/dev/null || exit $STATE_UNKNOWN
+/usr/bin/which awk   2>&1 1>/dev/null || exit $STATE_UNKNOWN
+
+
+# Process optional arguments: -c or --cell to specify cells to check.
+while [ $# -gt 0 ] ; do
+  case "$1" in
+    -c | --cell)
+      CELLS="$CELLS $2"
+      shift 2
+      ;;
+    *)
+      echo "Usage: $PROGNAME [-c cellname [-c cellname...]]" ; exit $STATE_UNKNOWN
+      ;;
+  esac
+done
+
+
+HOSTNAME=`hostname -s`
+STDERR=`mktemp /tmp/$PROGNAME.tmp.XXXXXXXXXX`
+
+# A fix for a weird bug in Lynx.
+export HOME=/tmp
+
+CELLINFO=`lynx -width=200 -dump http://dcmain.grid.sara.nl:2288/cellInfo 2> $STDERR`
+ERROR=`cat $STDERR | perl -p -e 's/\s+$/ - /g' | sed -e 's/ - $//'`
+
+# First some sanity checks
+if [ -n "$ERROR" ] ; then
+  echo "$CHECK_NAME UNKNOWN - $ERROR."
+  exit $STATE_UNKNOWN
+fi
+if [ -z "$CELLINFO" ] ; then
+  echo "$CHECK_NAME UNKNOWN - output of 'lynx -width=200 -dump http://dcmain.grid.sara.nl:2288/cellInfo' is empty."
+  exit $STATE_UNKNOWN
+fi
+
+if [ -z "$CELLS" ] ; then
+  # No cells specified: find cell list based on hostname.
+  OFFLINE_CELLS=`echo "$CELLINFO" | grep ${HOSTNAME}Domain | grep    OFFLINE | awk '{print $1}' | perl -p -e 's/\s+$/; /g' | sed -e 's/; $//'`
+  RUNNING_CELLS=`echo "$CELLINFO" | grep ${HOSTNAME}Domain | grep -v OFFLINE | awk '{print $1}' | perl -p -e 's/\s+$/; /g' | sed -e 's/; $//'`
+
+  NUM_OFFLINE=`echo "$CELLINFO" | grep ${HOSTNAME}Domain | grep    OFFLINE | wc -l`
+  NUM_RUNNING=`echo "$CELLINFO" | grep ${HOSTNAME}Domain | grep -v OFFLINE | wc -l`
+
+  if [ -n "$OFFLINE_CELLS" ] ; then
+    echo "$CHECK_NAME CRITICAL - $NUM_OFFLINE offline cells: $OFFLINE_CELLS"
+    exit $STATE_CRITICAL
+  fi
+else
+  # Cells specified. Check them all.
+  for CELL in $CELLS ; do
+    if echo "$CELLINFO" | grep --silent "$CELL" ; then
+      # Cell is listed in cellinfo
+      if echo "$CELLINFO" | grep "$CELL" | grep --silent OFFLINE ; then
+        # Cell is offline
+        NUM_OFFLINE=$(($NUM_OFFLINE + 1))
+        if [ -z "$OFFLINE_CELLS" ] ; then
+          OFFLINE_CELLS="$CELL"
+        else
+          OFFLINE_CELLS="$OFFLINE_CELLS; $CELL"
+        fi
+      else
+        # Cell is running
+        NUM_RUNNING=$(($NUM_RUNNING + 1))
+        if [ -z "$RUNNING_CELLS" ] ; then
+          RUNNING_CELLS="$CELL"
+        else
+          RUNNING_CELLS="$RUNNING_CELLS; $CELL"
+        fi
+      fi
+    else
+      # Cell is not listed!
+      NUM_MISSING=$(($NUM_MISSING + 1))
+      if [ -z "$MISSING_CELLS" ] ; then
+        MISSING_CELLS="$CELL"
+      else
+        MISSING_CELLS="$MISSING_CELLS; $CELL"
+      fi
+    fi
+  done
+  # Compose report.
+  if [ -n "$OFFLINE_CELLS" ] ; then
+    echo "$CHECK_NAME CRITICAL - $NUM_OFFLINE offline cells: $OFFLINE_CELLS - $NUM_MISSING missing cells: $MISSING_CELLS - $NUM_RUNNING running cells: $RUNNING_CELLS"
+    exit $STATE_CRITICAL
+  fi
+  if [ -n "$MISSING_CELLS" ] ; then
+    echo "$CHECK_NAME CRITICAL - $NUM_MISSING missing cells: $MISSING_CELLS - $NUM_RUNNING running cells: $RUNNING_CELLS"
+    exit $STATE_CRITICAL
+  fi
+fi
+
+echo "$CHECK_NAME OK - $NUM_RUNNING running cells: $RUNNING_CELLS"
+exit $STATE_OK
