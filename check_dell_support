@@ -3,8 +3,10 @@
 #
 # Description:
 #
-# This plugin checks how many days a Dell host is supported.
+# This Nagios/Icinga plugin checks how many days a Dell host is supported.
 #
+# Changes:
+# 2012-03-12 - Onno - Caching, changed URL
 
 # Nagios return codes
 STATE_OK=0
@@ -16,6 +18,11 @@ STATE_DEPENDENT=4
 CHECK_NAME="DELL SUPPORT"
 
 PROGNAME=`basename $0`
+
+DELL_SUPPORT_URL="http://www.dell.com/support/troubleshooting/us/en/19/Index?ServiceTag="
+CACHEDIR="/var/cache/dell_support_info"
+mkdir --parents "$CACHEDIR"
+CACHE_DAYS=31
 
 # Check some commands that we need
 /usr/bin/which dmidecode 2>&1 1>/dev/null || exit $STATE_UNKNOWN
@@ -53,29 +60,38 @@ fi
 
 ADDITIONAL_INFO="Checked serial numbers:"
 for SERIAL in $POWEREDGE_SERIAL_NUMBERS ; do
-  ADDITIONAL_INFO="$ADDITIONAL_INFO <a href='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL'>$SERIAL</a>"
+  ADDITIONAL_INFO="$ADDITIONAL_INFO <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a>"
 done
 
 for SERIAL in $POWEREDGE_SERIAL_NUMBERS ; do
-  SUPPORT_LINES=`lynx -width=200 -dump http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL | grep -4 'Days Left' | tail -n +6  | grep DELL`
+  SUPPORT_LINES=`lynx -width=200 -dump $DELL_SUPPORT_URL$SERIAL | grep '\[[0-9]\+\] *days *remaining' | sed -e 's/ See the .*Warranty Tab for details//'`
   if [ -z "$SUPPORT_LINES" ] ; then
-    echo "$CHECK_NAME UNKNOWN - Unable to get support information. Check http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL"
-    exit $STATE_UNKNOWN
+    # Perhaps website down. Do we have a recent cached version?
+    if find "$CACHEDIR" -type f -name "$SERIAL" -mtime -$CACHE_DAYS | grep --silent . ; then
+      SUPPORT_LINES=`cat "$CACHEDIR/$SERIAL"`
+      CACHE_REMARK=" - Web page unavailable; using cached information."
+    else
+      echo "$CHECK_NAME UNKNOWN - Unable to get support information and cached info has expired. Check $DELL_SUPPORT_URL$SERIAL"
+      exit $STATE_UNKNOWN
+    fi
+  else
+    # Page collected succesfully; save in cache.
+    echo "$SUPPORT_LINES" > "$CACHEDIR/$SERIAL"
   fi
-  DAYS_LEFT=`echo "$SUPPORT_LINES" | awk '{print $NF}' | sort -n | tail -n 1`
+  DAYS_LEFT=`echo "$SUPPORT_LINES" | grep -o '\[[0-9]\+\]' | grep -o '[0-9]\+' | sort -n | tail -n 1`
   # Collect info to display, format "line 1 - line 2"
   SUPPORT_INFO_TMP=`echo -e "$SUPPORT_LINES" | perl -p -e 's/\s+$/ - /g' | sed -e 's/ - $//'`
   SUPPORT_INFO=`echo $SUPPORT_INFO_TMP`
   # Determine status
   if [ $DAYS_LEFT -lt $CRITICAL_DAYS ] ; then
-    echo "$CHECK_NAME CRITICAL - $DAYS_LEFT days of support left for <a href='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO"
+    echo "$CHECK_NAME CRITICAL - $DAYS_LEFT days of support left for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO $CACHE_REMARK"
     exit $STATE_CRITICAL
   fi
   if [ $DAYS_LEFT -lt $WARNING_DAYS ] ; then
-    echo "$CHECK_NAME WARNING - $DAYS_LEFT days of support left for <a href='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO"
+    echo "$CHECK_NAME WARNING - $DAYS_LEFT days of support left for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO $CACHE_REMARK"
     exit $STATE_WARNING
   fi
 done
 
-echo "$CHECK_NAME OK - $DAYS_LEFT days of support left for <a href='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?ServiceTag=$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO"
+echo "$CHECK_NAME OK - $DAYS_LEFT days of support left for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO $CACHE_REMARK"
 exit $STATE_OK
