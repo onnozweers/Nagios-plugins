@@ -3,8 +3,10 @@
 #
 # Description:
 #
-# This plugin checks when the last backup was made with TSM and warns if it was too long ago.
+# This plugin checks if we're running the newest installed kernel.
+# It has been tested on Centos 6 but should work on other RPM based distros too.
 #
+# 2013-01-31 - Onno - Created function compare_versions with improved logic.
 
 # Nagios return codes
 STATE_OK=0
@@ -23,32 +25,67 @@ if ! grep --help | grep -- '--only-matching' &> /dev/null ; then
     exit $STATE_UNKNOWN
 fi
 
-RUNNING_KERNEL=`uname -r | sed 's/.el[56].*//' | grep -o '[0-9].*[0-9]'`
-LATEST_KERNEL=`rpm -qa | \
-               grep '^kernel-[[:digit:]]' | \
-               sed 's/\.x86_64//' | \
-               sed 's/\.el[56]//' | \
+compare_versions() {
+  # Put the version number in a bash list
+  local version1=(`echo $1 | sed -e 's/[\.\-]/ /g' `)
+  local version2=(`echo $3 | sed -e 's/[\.\-]/ /g' `)
+  #echo "${version1[@]} ? ${version2[@]}"
+  local operator="$2"
+  EQUAL='=' ; FIRST_BIGGER='>' ; SECOND_BIGGER='<' 
+  i=0
+  # Check all elements of the version number, starting with the most significant
+  while true ; do
+    #echo "Comparing ${version1[$i]} and ${version2[$i]}"
+    # Are we done checking?
+    if [ -z "${version1[$i]}" -a -z "${version2[$i]}" ] ; then
+      test "$operator" = "$EQUAL"
+      return $?   # Return exit value of the previous test command
+    fi
+    # If one of the version numbers has less elements, assume zero.
+    if [ -z "${version1[$i]}" ] ; then
+      {version1[$i]}=0
+    fi
+    if [ -z "${version2[$i]}" ] ; then
+      {version2[$i]}=0
+    fi
+    if [ "${version1[$i]}" -gt "${version2[$i]}" ] ; then
+      test "$operator" = "$FIRST_BIGGER"
+      return $?
+    fi
+    if [ "${version1[$i]}" -lt "${version2[$i]}" ] ; then
+      test "$operator" = "$SECOND_BIGGER"
+      return $?
+    fi
+    i=$((i + 1))
+  done
+}
+
+RUNNING_KERNEL=`uname -r | sed 's/\.el[56].*//' | grep -o '[0-9].*[0-9]'`
+INSTALLED_KERNELS=`rpm -qa | \
+               grep '^kernel-\(lt-\)\{0,1\}[[:digit:]]' | \
+               sed 's/\.x86_64.*//' | \
+               sed 's/\.el[56].*//' | \
                grep -o '[0-9].*[0-9]' | \
-               sed 's/2.6.32-71$/2.6.32-71.00.0/' | \
-               sed 's/\.\([0-9]\)$/.0\1/' | \
-               sed 's/\.\([0-9]\.\)/.0\1/g' | \
-               sed 's/-\([0-9][0-9]\.\)/-0\1/' | \
-               sort -n | \
-               tail -n 1 | \
-               sed 's/-0\([0-9][0-9]\.\)/-\1/' | \
-               sed 's/\.0\([0-9]\.\)/.\1/g' | \
-               sed 's/\.0\([0-9]\)$/.\1/' `
+               sort `
 
+# Assume OK until proven not OK
+running_kernel_is_the_latest=true
+for INSTALLED_KERNEL in $INSTALLED_KERNELS ; do
+  if compare_versions "$RUNNING_KERNEL" '<' "$INSTALLED_KERNEL" ; then
+    running_kernel_is_the_latest=false
+    NEWER_KERNELS="$NEWER_KERNELS $INSTALLED_KERNEL" 
+  fi
+done
 
-if [ "$RUNNING_KERNEL" = "$LATEST_KERNEL" ] ; then
-    echo "OK - Running kernel: `uname -r`; available kernels: `rpm -qa | grep '^kernel-[[:digit:]].*' | sort -n | tr '\n' ' ' | sed 's/ k/ - k/g'`."
+if $running_kernel_is_the_latest ; then
+    echo "OK - Running kernel: $RUNNING_KERNEL; available kernels: " $INSTALLED_KERNELS.
     exit $STATE_OK
 else
     if [ "$1" = "--warn-only" ] ; then
-        echo "$CHECK_NAME WARNING - Latest kernel: $LATEST_KERNEL; running kernel: $RUNNING_KERNEL."
+        echo "$CHECK_NAME WARNING - Running kernel: $RUNNING_KERNEL but newer kernels available: $NEWER_KERNELS."
         exit $STATE_WARNING
     else
-        echo "$CHECK_NAME CRITICAL - Latest kernel: $LATEST_KERNEL; running kernel: $RUNNING_KERNEL."
+        echo "$CHECK_NAME CRITICAL - Running kernel: $RUNNING_KERNEL but newer kernels available: $NEWER_KERNELS."
         exit $STATE_CRITICAL
     fi
 fi
