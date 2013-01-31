@@ -1,0 +1,5 @@
+This is a collection of Nagios plugins that I created for my work at SURFsara,
+the Dutch national supercomputing center. I think they're far from perfect
+and could be easily improved especially regarding portability. I'd welcome contributions.
+
+Onno Zweers
