@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Written by Onno Zweers
+
+# Nagios return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+STATE_DEPENDENT=4
+
+YUM_OUTPUT=`yum check-update 2>&1`
+RESULT=$?
+
+EXTRA_INFORMATION="Yum exit code: $RESULT"
+
+# Yum check unsuccessful?
+if [ "$RESULT" = "1" ] ; then
+    echo "UNKNOWN - error while doing 'yum check-update'. | $EXTRA_INFORMATION"
+    echo "Yum output: $YUM_OUTPUT"
+    exit $STATE_UNKNOWN
+fi
+
+LIST=`echo "$YUM_OUTPUT" | awk '/^$/ {emptylinereached=1;next}; emptylinereached==1 {print}' | egrep '^\w.*\.(x86_64|i.86|noarch)\s' | sed -e 's/\(\w*\)\.\(x86_64\|i.86\|noarch\) .*/\1/'`
+
+COUNT=`echo "$LIST" | wc -l`
+if echo "$LIST" | grep --silent '^kernel' ; then
+  KERNEL=", including a kernel" 
+fi
+
+if [ "$RESULT" = "0" ] ; then
+    echo "OK - no yum updates found."
+    exit $STATE_OK
+else
+    LIST=`echo $LIST | tr '\n' ' '`
+    if [ "$1" == "--only-warn" ] ; then
+        echo "WARNING - $COUNT updates available$KERNEL. | $LIST --- $EXTRA_INFORMATION"
+        exit $STATE_WARNING
+    else
+        echo "CRITICAL - $COUNT updates available$KERNEL. | $LIST --- $EXTRA_INFORMATION"
+        exit $STATE_CRITICAL
+    fi
+fi
