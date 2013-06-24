@@ -1,0 +1,57 @@
+#!/bin/bash
+# Onno Zweers, juni 2013
+#
+# Description:
+#
+# This plugin checks if a remote host cert is OK.
+
+# Nagios return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+STATE_DEPENDENT=4
+
+CHECK_NAME="CERT"
+PROGNAME=`basename $0`
+CA_PATH='/etc/grid-security/certificates/'
+
+if [ -z "$1" ] ; then
+  echo "Checks a certificate on a remote host." 
+  echo "Usage: $PROGNAME host:port" 
+  exit $STATE_UNKNOWN
+fi
+
+HOST_PORT="$1"
+
+# Check commands that we need
+/usr/bin/which openssl 2>&1 1>/dev/null || exit $STATE_UNKNOWN
+
+# Check if CA cert path exists.
+if [ ! -d "$CA_PATH" ] ; then
+  echo "UNKNOWN - CA cert directory $CA_PATH not found."
+  exit $STATE_UNKNOWN
+fi
+
+
+OUTPUT=`echo "quit" | openssl s_client -connect $HOST_PORT -CApath $CA_PATH 2>&1`
+ERROR=`echo "$OUTPUT" | grep 'verify error'`
+
+if [ -n "$ERROR" ] ; then
+  echo "$CHECK_NAME CRITICAL - " $ERROR ". | " $OUTPUT
+  exit $STATE_CRITICAL
+fi
+
+if ! echo "$OUTPUT" | grep --silent 'CONNECTED' ; then
+  echo "$CHECK_NAME CRITICAL - Could not connect to $1. | " $OUTPUT
+  exit $STATE_CRITICAL
+fi
+
+if echo "$OUTPUT" | grep --silent '^verify return:1$' ; then
+  echo "$CHECK_NAME OK - Host cert for $HOST_PORT verified without error. | " $OUTPUT
+  exit $STATE_OK
+fi
+
+# If we get here, we don't know what happened.
+echo "$CHECK_NAME UNKNOWN - Unexpected openssl output, see info for more details. | " $OUTPUT
+exit $STATE_UNKNOWN
