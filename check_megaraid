@@ -1,8 +1,10 @@
 #!/bin/bash
 
 # Uses MegaCli to check the status of disks attached to an LSI controller.
+# Optional argument: [ --html | --newline ]
 # Bugs: this check will probably fail if you have more than one adapter in a host.
 # 2013-12-03 - Onno - Created.
+# 2013-12-05 - Onno - Added output format option.
 
 # Nagios return codes
 STATE_OK=0
@@ -19,6 +21,17 @@ if [ ! -x "$MEGACLI" ] ; then
   exit $STATE_UNKNOWN
 fi
 
+case "$1" in
+  "--html"|"-h")
+    LINEFEED="<br>"
+    ;;
+  "--newline"|"-n")
+    LINEFEED="\n"
+    ;;
+  *)
+    LINEFEED=" --- "
+esac
+
 SYSTEM_SN=`dmidecode | grep 'Base Board Information' -A 5 | grep 'Serial Number' | sed -e 's/.*: //'`
 
 REPORT=""
@@ -31,7 +44,7 @@ for VIRTUAL_DRIVE in `$MEGACLI -LDInfo -Lall -aALL | grep -o 'Virtual Drive: [0-
     if [ -z "$REPORT" ] ; then
       REPORT="Virtual drive $VIRTUAL_DRIVE ($SIZE): $STATE"
     else
-      REPORT="$REPORT --- Virtual drive $VIRTUAL_DRIVE ($SIZE): $STATE"
+      REPORT="${REPORT}${LINEFEED}Virtual drive $VIRTUAL_DRIVE ($SIZE): $STATE"
     fi
   fi
 done
@@ -56,7 +69,7 @@ for ENCLOSURE_ID in `$MEGACLI -PDList -aAll | grep "Enclosure Device" | awk '{pr
       if [ -z "$REPORT" ] ; then
         REPORT="$DISKREPORT"
       else
-        REPORT="$REPORT --- $DISKREPORT"
+        REPORT="${REPORT}${LINEFEED}${DISKREPORT}"
       fi
     fi
   done
@@ -67,6 +80,6 @@ if [ -z "$REPORT" ] ; then
   echo "OK - System S/N=$SYSTEM_SN: no disk problems found."
   exit $STATE_OK
 else
-  echo "CRITICAL - System S/N=$SYSTEM_SN: $REPORT"
+  echo -e "CRITICAL - System S/N=$SYSTEM_SN: ${LINEFEED}${REPORT}"
   exit $STATE_CRITICAL
 fi
