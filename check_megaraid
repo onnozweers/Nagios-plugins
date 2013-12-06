@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Uses MegaCli to check the status of disks.
+# Uses MegaCli to check the status of disks attached to an LSI controller.
 # Optional argument: [ --html | --newline ]
 # Bugs: this check will probably fail if you have more than one adapter in a host.
 # 2013-12-03 - Onno - Created.
