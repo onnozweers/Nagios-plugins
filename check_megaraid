@@ -90,7 +90,7 @@ for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER | grep "Enclosure Device" | awk
           line="$line ($REBUILD_PROGRESS)"
         fi
         if [ -z "$DISKREPORT" ] ; then
-          DISKREPORT=`echo Enclosure/slot [$ENCLOSURE_ID:$SLOT] WWN=$DISK_WWN $DISK_SERIAL "($SIZE)" - $line""`
+          DISKREPORT=`echo Enclosure/slot [$ENCLOSURE_ID:$SLOT] WWN=$DISK_WWN $DISK_SERIAL "($SIZE)" - $line`
         else
           DISKREPORT="$DISKREPORT - `echo $line`"
         fi
