@@ -5,7 +5,8 @@
 # Bugs: this check will probably fail if you have more than one adapter in a host.
 # 2013-12-03 - Onno - Created.
 # 2013-12-05 - Onno - Added output format option.
-# 2013-12-06 - Onno - Added check for missing disks
+# 2013-12-06 - Onno - Added check for missing disks.
+# 2013-12-06 - Onno - Added rebuild progress indication.
 
 # Nagios return codes
 STATE_OK=0
@@ -84,8 +85,12 @@ for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER | grep "Enclosure Device" | awk
     if [ -n "$ERRORLINES" ] ; then
       DISKREPORT=""
       while read line ; do
+        if echo "$line" | grep --silent 'Rebuild' ; then
+          REBUILD_PROGRESS=`$MEGACLI -pdrbld -showprog -physdrv [$ENCLOSURE_ID:$SLOT] -a$ADAPTER | grep -o 'Completed [0-9]\+%'`
+          line="$line ($REBUILD_PROGRESS)"
+        fi
         if [ -z "$DISKREPORT" ] ; then
-          DISKREPORT=`echo Enclosure/slot [$ENCLOSURE_ID:$SLOT] WWN=$DISK_WWN $DISK_SERIAL "($SIZE)" - $line`
+          DISKREPORT=`echo Enclosure/slot [$ENCLOSURE_ID:$SLOT] WWN=$DISK_WWN $DISK_SERIAL "($SIZE)" - $line""`
         else
           DISKREPORT="$DISKREPORT - `echo $line`"
         fi
