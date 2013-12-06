@@ -1,10 +1,11 @@
 #!/bin/bash
 
-# Uses MegaCli to check the status of disks attached to an LSI controller.
+# Uses MegaCli to check the status of disks.
 # Optional argument: [ --html | --newline ]
 # Bugs: this check will probably fail if you have more than one adapter in a host.
 # 2013-12-03 - Onno - Created.
 # 2013-12-05 - Onno - Added output format option.
+# 2013-12-06 - Onno - Added check for missing disks
 
 # Nagios return codes
 STATE_OK=0
@@ -32,12 +33,16 @@ case "$1" in
     LINEFEED=" --- "
 esac
 
+# ToDo: iterate over all available adapters. For now, assume there's only one.
+ADAPTER=0
+
 SYSTEM_SN=`dmidecode | grep 'Base Board Information' -A 5 | grep 'Serial Number' | sed -e 's/.*: //'`
 
 REPORT=""
 
-for VIRTUAL_DRIVE in `$MEGACLI -LDInfo -Lall -aALL | grep -o 'Virtual Drive: [0-9]\+' | sed -e 's/.*: //'` ; do
-  LDINFO=`$MEGACLI -LDInfo -L${VIRTUAL_DRIVE} -aALL`
+# Report virtual drive issues (partially degraded, degraded)
+for VIRTUAL_DRIVE in `$MEGACLI -LDInfo -Lall -a$ADAPTER | grep -o 'Virtual Drive: [0-9]\+' | sed -e 's/.*: //'` ; do
+  LDINFO=`$MEGACLI -LDInfo -L${VIRTUAL_DRIVE} -a$ADAPTER`
   SIZE=`echo "$LDINFO" | grep '^Size' | sed -e 's/.*: //'`
   STATE=`echo "$LDINFO" | grep '^State' | sed -e 's/.*: //'`
   if [ "$STATE" != "Optimal" ] ; then
@@ -49,14 +54,33 @@ for VIRTUAL_DRIVE in `$MEGACLI -LDInfo -Lall -aALL | grep -o 'Virtual Drive: [0-
   fi
 done
 
-for ENCLOSURE_ID in `$MEGACLI -PDList -aAll | grep "Enclosure Device" | awk '{print $4}' | sort -nu` ;do
-  for SLOT in `$MEGACLI -PDList -aAll | grep -A 1 "Enclosure Device ID: $ENCLOSURE_ID" | grep "Slot Number" | awk '{print $3}'` ; do
-    DISKINFO=`$MEGACLI -pdinfo -PhysDrv [$ENCLOSURE_ID:$SLOT] -aAll`
+# Report missing disks
+MISSING_DISK_INFO=`/opt/MegaRAID/MegaCli/MegaCli64 -PdGetMissing -a$ADAPTER`
+if echo "$MISSING_DISK_INFO" | grep --silent 'Adapter.*Missing Physical drives' ; then
+  while read line ; do
+    NUMBER=`echo "$line" | awk 'print $1'`
+    ARRAY=`echo "$line" | awk 'print $2'`
+    ROW=`echo "$line" | awk 'print $3'`
+    SIZE=`echo "$line" | awk 'print $4'`
+    UNIT=`echo "$line" | awk 'print $5'`
+    MISSING_REPORT="Missing disk: Nr=$NUMBER Array=$ARRAY Row=$ROW Size=$SIZE $UNIT"
+    if [ -z "$REPORT" ] ; then
+      REPORT="$MISSING_REPORT"
+    else
+      REPORT="${REPORT}${LINEFEED}${MISSING_REPORT}"
+    fi
+  done < <(echo "$MISSING_DISK_INFO" | grep -o '[0-9]\+[[:space:]]\+[0-9]\+[[:space:]]\+[0-9]\+[[:space:]]\+[0-9]\+[[:space:]]*[KMGT]B')
+fi
+
+# Report physical drive errors
+for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER | grep "Enclosure Device" | awk '{print $4}' | sort -nu` ;do
+  for SLOT in `$MEGACLI -PDList -a$ADAPTER | grep -A 1 "Enclosure Device ID: $ENCLOSURE_ID" | grep "Slot Number" | awk '{print $3}'` ; do
+    DISKINFO=`$MEGACLI -pdinfo -PhysDrv [$ENCLOSURE_ID:$SLOT] -a$ADAPTER`
     DISK_TYPE=`echo "$DISKINFO" | grep 'PD Type:' | sed -e 's/.*: //'`
     DISK_WWN=`echo "$DISKINFO" | grep 'WWN:' | sed -e 's/.*: //'`
     DISK_SERIAL=`echo "$DISKINFO" | grep 'Inquiry Data:' | sed -e 's/.*: //'`
     SIZE=`echo "$DISKINFO" | grep 'Raw Size:' | sed -e 's/.*: //' | sed -e 's/ \[0x.*//'`
-    ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state: Failed'`
+    ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state: Failed\|Firmware state: Rebuild'`
     if [ -n "$ERRORLINES" ] ; then
       DISKREPORT=""
       while read line ; do
