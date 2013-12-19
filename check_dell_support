@@ -28,7 +28,7 @@ CACHE_DAYS=3650
 
 # Check some commands that we need
 /usr/bin/which dmidecode 2>&1 1>/dev/null || exit $STATE_UNKNOWN
-/usr/bin/which lynx      2>&1 1>/dev/null || exit $STATE_UNKNOWN
+/usr/bin/which wget      2>&1 1>/dev/null || exit $STATE_UNKNOWN
 /usr/bin/which perl      2>&1 1>/dev/null || exit $STATE_UNKNOWN
 
 
@@ -74,7 +74,10 @@ for SERIAL in $POWEREDGE_SERIAL_NUMBERS ; do
 done
 
 for SERIAL in $POWEREDGE_SERIAL_NUMBERS ; do
-  WARRANTY_LINES=`lynx -width=200 -dump $DELL_SUPPORT_URL$SERIAL | grep 'Warranty end date:' | sed -e 's/\[[0-9]\+\]//' `
+  # This part is tricky. Dell tends to change the URL from time to time.
+  WARRANTY_LINES=`wget --tries 3 --quiet --output-document=- "http://www.dell.com/support/my-support/us/en/19/product-support/servicetag/$SERIAL" \
+                  | grep -A 3 '<div class="span4 dateStyle" style="padding-left: 20px">.*upport.*</div>' \
+                  | grep -o '[0-9]\+/[0-9]\+/[0-9]\+' `
   if [ -z "$WARRANTY_LINES" ] ; then
     # Perhaps website down. Do we have a recent cached version?
     if find "$CACHEDIR" -type f -name "$SERIAL" -mtime -$CACHE_DAYS | grep --silent . ; then
@@ -93,19 +96,16 @@ for SERIAL in $POWEREDGE_SERIAL_NUMBERS ; do
             | sed -e 's/\b[0-9]\b/0&/g ; s#\([0-9]\+\)/\([0-9]\+\)/\([0-9]\+\)#\3\1\2#' \
             | sort -n | tail -n 1`
   END_DATE_READABLE=`echo $END_DATE | sed -e 's/\(....\)\(..\)\(..\)/\1-\2-\3/'`
-  # Collect info to display, format "line 1 - line 2"
-  WARRANTY_INFO_TMP=`echo -e "$WARRANTY_LINES" | perl -p -e 's/\s+$/ - /g' | sed -e 's/ - $//'`
-  WARRANTY_INFO=`echo $WARRANTY_INFO_TMP`
   # Determine status
   if [ $END_DATE -lt $CRITICAL_DATE ] ; then
-    echo "$CHECK_NAME CRITICAL - support for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a> expires $END_DATE_READABLE. - $ADDITIONAL_INFO - $WARRANTY_INFO $CACHE_REMARK"
+    echo "$CHECK_NAME CRITICAL - support for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a> expires $END_DATE_READABLE. - $WARRANTY_INFO $CACHE_REMARK"
     exit $STATE_CRITICAL
   fi
   if [ $END_DATE -lt $WARNING_DATE ] ; then
-    echo "$CHECK_NAME WARNING - support for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a> expires $END_DATE_READABLE. - $ADDITIONAL_INFO - $WARRANTY_INFO $CACHE_REMARK"
+    echo "$CHECK_NAME WARNING - support for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a> expires $END_DATE_READABLE. - $ADDITIONAL_INFO $CACHE_REMARK"
     exit $STATE_WARNING
   fi
 done
 
-echo "$CHECK_NAME OK - support for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a> expires $END_DATE_READABLE. - $ADDITIONAL_INFO - $WARRANTY_INFO $CACHE_REMARK"
+echo "$CHECK_NAME OK - support for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a> expires $END_DATE_READABLE. - $ADDITIONAL_INFO $CACHE_REMARK"
 exit $STATE_OK
