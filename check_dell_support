@@ -3,10 +3,12 @@
 #
 # Description:
 #
-# This Nagios/Icinga plugin checks how many days a Dell host is supported.
+# This plugin checks how many days a Dell host is supported.
 #
 # Changes:
 # 2012-03-12 - Onno - Caching, changed URL
+# 2013-11-10 - Onno - Caching changed from 31 days to 10 years :-)
+# 2013-12-19 - Onno - URL changed again (why?)
 
 # Nagios return codes
 STATE_OK=0
@@ -19,10 +21,10 @@ CHECK_NAME="DELL SUPPORT"
 
 PROGNAME=`basename $0`
 
-DELL_SUPPORT_URL="http://www.dell.com/support/troubleshooting/us/en/19/Index?ServiceTag="
+DELL_SUPPORT_URL="http://www.dell.com/support/my-support/us/en/19/product-support/servicetag/"
 CACHEDIR="/var/cache/dell_support_info"
 mkdir --parents "$CACHEDIR"
-CACHE_DAYS=31
+CACHE_DAYS=3650
 
 # Check some commands that we need
 /usr/bin/which dmidecode 2>&1 1>/dev/null || exit $STATE_UNKNOWN
@@ -31,8 +33,8 @@ CACHE_DAYS=31
 
 
 # Set defaults
-WARNING_DAYS=90
-CRITICAL_DAYS=30
+WARNING_DAYS=30
+CRITICAL_DAYS=0
 
 # Collect arguments
 while getopts w:c:s: OPT $@; do
@@ -49,6 +51,14 @@ while getopts w:c:s: OPT $@; do
   esac
 done
 
+WARNING_DATE=`date --date="$WARNING_DAYS days ago" +%Y%d%m`
+if [ "$CRITICAL_DAYS" = "0" ] ; then
+  # 0 means: no critical, only warning.
+  CRITICAL_DATE=`date --date="20 years ago" +%Y%d%m`
+else
+  CRITICAL_DATE=`date --date="$CRITICAL_DAYS days ago" +%Y%d%m`
+fi
+
 if [ -z "$POWEREDGE_SERIAL_NUMBERS" ] ; then
   # This host can have several serial numbers (blade & chassis)
   POWEREDGE_SERIAL_NUMBERS=`dmidecode | grep -2 PowerEdge | grep Serial | sed -e 's/.*Serial Number: //'`
@@ -64,11 +74,11 @@ for SERIAL in $POWEREDGE_SERIAL_NUMBERS ; do
 done
 
 for SERIAL in $POWEREDGE_SERIAL_NUMBERS ; do
-  SUPPORT_LINES=`lynx -width=200 -dump $DELL_SUPPORT_URL$SERIAL | grep '\[[0-9]\+\] *days *remaining' | sed -e 's/ See the .*Warranty Tab for details//'`
-  if [ -z "$SUPPORT_LINES" ] ; then
+  WARRANTY_LINES=`lynx -width=200 -dump $DELL_SUPPORT_URL$SERIAL | grep 'Warranty end date:' | sed -e 's/\[[0-9]\+\]//' `
+  if [ -z "$WARRANTY_LINES" ] ; then
     # Perhaps website down. Do we have a recent cached version?
     if find "$CACHEDIR" -type f -name "$SERIAL" -mtime -$CACHE_DAYS | grep --silent . ; then
-      SUPPORT_LINES=`cat "$CACHEDIR/$SERIAL"`
+      WARRANTY_LINES=`cat "$CACHEDIR/$SERIAL"`
       CACHE_REMARK=" - Web page unavailable; using cached information."
     else
       echo "$CHECK_NAME UNKNOWN - Unable to get support information and cached info has expired. Check $DELL_SUPPORT_URL$SERIAL"
@@ -76,22 +86,26 @@ for SERIAL in $POWEREDGE_SERIAL_NUMBERS ; do
     fi
   else
     # Page collected succesfully; save in cache.
-    echo "$SUPPORT_LINES" > "$CACHEDIR/$SERIAL"
+    echo "$WARRANTY_LINES" > "$CACHEDIR/$SERIAL"
   fi
-  DAYS_LEFT=`echo "$SUPPORT_LINES" | grep -o '\[[0-9]\+\]' | grep -o '[0-9]\+' | sort -n | tail -n 1`
+  # The sed converts date from m/d/yyyy to yyyymmdd.
+  END_DATE=`echo "$WARRANTY_LINES" | grep -o '[0-9/]\+' \
+            | sed -e 's/\b[0-9]\b/0&/g ; s#\([0-9]\+\)/\([0-9]\+\)/\([0-9]\+\)#\3\1\2#' \
+            | sort -n | tail -n 1`
+  END_DATE_READABLE=`echo $END_DATE | sed -e 's/\(....\)\(..\)\(..\)/\1-\2-\3/'`
   # Collect info to display, format "line 1 - line 2"
-  SUPPORT_INFO_TMP=`echo -e "$SUPPORT_LINES" | perl -p -e 's/\s+$/ - /g' | sed -e 's/ - $//'`
-  SUPPORT_INFO=`echo $SUPPORT_INFO_TMP`
+  WARRANTY_INFO_TMP=`echo -e "$WARRANTY_LINES" | perl -p -e 's/\s+$/ - /g' | sed -e 's/ - $//'`
+  WARRANTY_INFO=`echo $WARRANTY_INFO_TMP`
   # Determine status
-  if [ $DAYS_LEFT -lt $CRITICAL_DAYS ] ; then
-    echo "$CHECK_NAME CRITICAL - $DAYS_LEFT days of support left for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO $CACHE_REMARK"
+  if [ $END_DATE -lt $CRITICAL_DATE ] ; then
+    echo "$CHECK_NAME CRITICAL - support for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a> expires $END_DATE_READABLE. - $ADDITIONAL_INFO - $WARRANTY_INFO $CACHE_REMARK"
     exit $STATE_CRITICAL
   fi
-  if [ $DAYS_LEFT -lt $WARNING_DAYS ] ; then
-    echo "$CHECK_NAME WARNING - $DAYS_LEFT days of support left for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO $CACHE_REMARK"
+  if [ $END_DATE -lt $WARNING_DATE ] ; then
+    echo "$CHECK_NAME WARNING - support for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a> expires $END_DATE_READABLE. - $ADDITIONAL_INFO - $WARRANTY_INFO $CACHE_REMARK"
     exit $STATE_WARNING
   fi
 done
 
-echo "$CHECK_NAME OK - $DAYS_LEFT days of support left for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a>. - $ADDITIONAL_INFO - $SUPPORT_INFO $CACHE_REMARK"
+echo "$CHECK_NAME OK - support for <a href='$DELL_SUPPORT_URL$SERIAL'>$SERIAL</a> expires $END_DATE_READABLE. - $ADDITIONAL_INFO - $WARRANTY_INFO $CACHE_REMARK"
 exit $STATE_OK
