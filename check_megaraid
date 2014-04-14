@@ -9,6 +9,13 @@
 # 2013-12-06 - Onno - Added rebuild progress indication.
 # 2013-12-06 - Onno - Detect more firmware states.
 
+# Only runnable for root
+if [[ $EUID -ne 0 ]]; 
+    then
+        echo "This script must be run as root" 1>&2
+        exit 1
+    fi
+
 # Nagios return codes
 STATE_OK=0
 STATE_WARNING=1
