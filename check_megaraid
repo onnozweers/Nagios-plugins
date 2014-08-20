@@ -8,6 +8,7 @@
 # 2013-12-06 - Onno - Added check for missing disks.
 # 2013-12-06 - Onno - Added rebuild progress indication.
 # 2013-12-06 - Onno - Detect more firmware states.
+# 2014-08-20 - a-nldisr - Get S/N for Fujitsu systems.
 
 # Only runnable for root
 if [[ $EUID -ne 0 ]]; 
@@ -50,7 +51,7 @@ for SYSTEM_VENDOR in `dmidecode |grep -i Vendor -A 0|sed -e 's/.*: //'` ; do
   if [ $SYSTEM_VENDOR != "FUJITSU" ] ; then
     SYSTEM_SN=`dmidecode | grep 'Base Board Information' -A 5 | grep 'Serial Number' | sed -e 's/.*: //'`
   else
-    SYSTEM_SN=`dmidecode |grep 'System Information' -A 5 | grep 'Serial Number' | sed -e 's/.*: //'`
+    SYSTEM_SN=`dmidecode | grep 'System Information' -A 5 | grep 'Serial Number' | sed -e 's/.*: //'`
   fi
 done
 
