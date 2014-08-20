@@ -45,7 +45,14 @@ esac
 # ToDo: iterate over all available adapters. For now, assume there's only one.
 ADAPTER=0
 
-SYSTEM_SN=`dmidecode | grep 'Base Board Information' -A 5 | grep 'Serial Number' | sed -e 's/.*: //'`
+# Depending on Vendor register the serialnumber
+for SYSTEM_VENDOR in `dmidecode |grep -i Vendor -A 0|sed -e 's/.*: //'` ; do
+  if [ $SYSTEM_VENDOR != "FUJITSU" ] ; then
+    SYSTEM_SN=`dmidecode | grep 'Base Board Information' -A 5 | grep 'Serial Number' | sed -e 's/.*: //'`
+  else
+    SYSTEM_SN=`dmidecode |grep 'System Information' -A 5 | grep 'Serial Number' | sed -e 's/.*: //'`
+  fi
+done
 
 REPORT=""
 
