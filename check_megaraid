@@ -12,6 +12,7 @@
 # 2013-12-23 - Alexander - Changed Media Errors and Other Errors from CRITICAL to WARNING.
 # 2014-04-14 - invokr - Fail when running as non-root user; no longer failing on drives marked as hotspare
 # 2014-08-20 - a-nldisr - Get S/N for Fujitsu systems.
+# 2014-08-25 - Onno - Added -NoLog to prevent /MegaSAS.log filling up partition.
 
 # Only runnable for root
 if [[ $EUID -ne 0 ]]; 
@@ -63,8 +64,8 @@ done
 REPORT=""
 
 # Report virtual drive issues (partially degraded, degraded)
-for VIRTUAL_DRIVE in `$MEGACLI -LDInfo -Lall -a$ADAPTER | grep -o 'Virtual Drive: [0-9]\+' | sed -e 's/.*: //'` ; do
-  LDINFO=`$MEGACLI -LDInfo -L${VIRTUAL_DRIVE} -a$ADAPTER`
+for VIRTUAL_DRIVE in `$MEGACLI -LDInfo -Lall -a$ADAPTER -NoLog | grep -o 'Virtual Drive: [0-9]\+' | sed -e 's/.*: //'` ; do
+  LDINFO=`$MEGACLI -LDInfo -L${VIRTUAL_DRIVE} -a$ADAPTER -NoLog`
   SIZE=`echo "$LDINFO" | grep '^Size' | sed -e 's/.*: //'`
   STATE=`echo "$LDINFO" | grep '^State' | sed -e 's/.*: //'`
   if [ "$STATE" != "Optimal" ] ; then
@@ -77,7 +78,7 @@ for VIRTUAL_DRIVE in `$MEGACLI -LDInfo -Lall -a$ADAPTER | grep -o 'Virtual Drive
 done
 
 # Report missing disks
-MISSING_DISK_INFO=`/opt/MegaRAID/MegaCli/MegaCli64 -PdGetMissing -a$ADAPTER`
+MISSING_DISK_INFO=`$MEGACLI -PdGetMissing -a$ADAPTER -NoLog`
 if echo "$MISSING_DISK_INFO" | grep --silent 'Adapter.*Missing Physical drives' ; then
   while read line ; do
     NUMBER=`echo "$line" | awk '{print $1}'`
@@ -96,9 +97,9 @@ fi
 
 # Report physical drive errors
 ERRORSTATE=$STATE_OK
-for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER | grep "Enclosure Device" | awk '{print $4}' | sort -nu` ;do
-  for SLOT in `$MEGACLI -PDList -a$ADAPTER | grep -A 1 "Enclosure Device ID: $ENCLOSURE_ID" | grep "Slot Number" | awk '{print $3}'` ; do
-    DISKINFO=`$MEGACLI -pdinfo -PhysDrv [$ENCLOSURE_ID:$SLOT] -a$ADAPTER`
+for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER -NoLog | grep "Enclosure Device" | awk '{print $4}' | sort -nu` ;do
+  for SLOT in `$MEGACLI -PDList -a$ADAPTER -NoLog | grep -A 1 "Enclosure Device ID: $ENCLOSURE_ID" | grep "Slot Number" | awk '{print $3}'` ; do
+    DISKINFO=`$MEGACLI -pdinfo -PhysDrv [$ENCLOSURE_ID:$SLOT] -a$ADAPTER -NoLog`
     DISK_TYPE=`echo "$DISKINFO" | grep 'PD Type:' | sed -e 's/.*: //'`
     DISK_WWN=`echo "$DISKINFO" | grep 'WWN:' | sed -e 's/.*: //'`
     DISK_SERIAL=`echo "$DISKINFO" | grep 'Inquiry Data:' | sed -e 's/.*: //'`
@@ -119,7 +120,7 @@ for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER | grep "Enclosure Device" | awk
           let NUMBER_OF_MEDIA_AND_OTHER_ERRORS=$NUMBER_OF_MEDIA_AND_OTHER_ERRORS+1
         fi
         if echo "$line" | grep --silent 'Rebuild' ; then
-          REBUILD_PROGRESS=`$MEGACLI -pdrbld -showprog -physdrv [$ENCLOSURE_ID:$SLOT] -a$ADAPTER | grep -o 'Completed [0-9]\+%'`
+          REBUILD_PROGRESS=`$MEGACLI -pdrbld -showprog -physdrv [$ENCLOSURE_ID:$SLOT] -a$ADAPTER -NoLog | grep -o 'Completed [0-9]\+%'`
           line="$line ($REBUILD_PROGRESS)"
         fi
         if [ -z "$DISKREPORT" ] ; then
