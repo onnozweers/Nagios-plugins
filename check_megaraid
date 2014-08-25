@@ -12,7 +12,7 @@
 # 2013-12-23 - Alexander - Changed Media Errors and Other Errors from CRITICAL to WARNING.
 # 2014-04-14 - invokr - Fail when running as non-root user; no longer failing on drives marked as hotspare
 # 2014-08-20 - a-nldisr - Get S/N for Fujitsu systems.
-# 2014-08-25 - Onno - Added -NoLog to prevent /MegaSAS.log filling up partition.
+# 2014-08-25 - Onno - Added -NoLog to prevent /MegaSAS.log filling up partition. Thanks to Rogier for bug report.
 
 # Only runnable for root
 if [[ $EUID -ne 0 ]]; 
