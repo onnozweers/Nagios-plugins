@@ -8,6 +8,8 @@
 # 2013-12-06 - Onno - Added check for missing disks.
 # 2013-12-06 - Onno - Added rebuild progress indication.
 # 2013-12-06 - Onno - Detect more firmware states.
+# 2013-12-23 - Alexander - Fixed syntax errors in the check for missing disks.
+# 2013-12-23 - Alexander - Changed Media Errors and Other Errors from CRITICAL to WARNING.
 # 2014-04-14 - invokr - Fail when running as non-root user; no longer failing on drives marked as hotspare
 # 2014-08-20 - a-nldisr - Get S/N for Fujitsu systems.
 
@@ -17,6 +19,8 @@ if [[ $EUID -ne 0 ]];
         echo "This script must be run as root" 1>&2
         exit 1
     fi
+
+DETECT_PREDICTIVE_FAILURE='yes'
 
 # Nagios return codes
 STATE_OK=0
@@ -76,11 +80,11 @@ done
 MISSING_DISK_INFO=`/opt/MegaRAID/MegaCli/MegaCli64 -PdGetMissing -a$ADAPTER`
 if echo "$MISSING_DISK_INFO" | grep --silent 'Adapter.*Missing Physical drives' ; then
   while read line ; do
-    NUMBER=`echo "$line" | awk 'print $1'`
-    ARRAY=`echo "$line" | awk 'print $2'`
-    ROW=`echo "$line" | awk 'print $3'`
-    SIZE=`echo "$line" | awk 'print $4'`
-    UNIT=`echo "$line" | awk 'print $5'`
+    NUMBER=`echo "$line" | awk '{print $1}'`
+    ARRAY=`echo "$line" | awk '{print $2}'`
+    ROW=`echo "$line" | awk '{print $3}'`
+    SIZE=`echo "$line" | awk '{print $4}'`
+    UNIT=`echo "$line" | awk '{print $5}'`
     MISSING_REPORT="Missing disk: Nr=$NUMBER Array=$ARRAY Row=$ROW Size=$SIZE $UNIT"
     if [ -z "$REPORT" ] ; then
       REPORT="$MISSING_REPORT"
@@ -91,6 +95,7 @@ if echo "$MISSING_DISK_INFO" | grep --silent 'Adapter.*Missing Physical drives' 
 fi
 
 # Report physical drive errors
+ERRORSTATE=$STATE_OK
 for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER | grep "Enclosure Device" | awk '{print $4}' | sort -nu` ;do
   for SLOT in `$MEGACLI -PDList -a$ADAPTER | grep -A 1 "Enclosure Device ID: $ENCLOSURE_ID" | grep "Slot Number" | awk '{print $3}'` ; do
     DISKINFO=`$MEGACLI -pdinfo -PhysDrv [$ENCLOSURE_ID:$SLOT] -a$ADAPTER`
@@ -98,10 +103,21 @@ for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER | grep "Enclosure Device" | awk
     DISK_WWN=`echo "$DISKINFO" | grep 'WWN:' | sed -e 's/.*: //'`
     DISK_SERIAL=`echo "$DISKINFO" | grep 'Inquiry Data:' | sed -e 's/.*: //'`
     SIZE=`echo "$DISKINFO" | grep 'Raw Size:' | sed -e 's/.*: //' | sed -e 's/ \[0x.*//'`
-    ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state:' | grep -v 'Firmware state: Online\|Firmware state: Hotspare'`
+    if [ "$DETECT_PREDICTIVE_FAILURE" = "yes" ] ; then
+      PREDICTIVE_FAILURE_REGEX='\|Predictive Failure'
+    else
+      PREDICTIVE_FAILURE_REGEX=''
+    fi
+    ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state:' | grep -v "Firmware state: Online\|Firmware state: Hotspare$PREDICTIVE_FAILURE_REGEX"`
     if [ -n "$ERRORLINES" ] ; then
+      NUMBER_OF_MEDIA_AND_OTHER_ERRORS=0
+      NUMBER_OF_ERRORLINES=0
       DISKREPORT=""
       while read line ; do
+        let NUMBER_OF_ERRORLINES=$NUMBER_OF_ERRORLINES+1
+        if echo "$line" | grep --silent 'Error Count' ; then
+          let NUMBER_OF_MEDIA_AND_OTHER_ERRORS=$NUMBER_OF_MEDIA_AND_OTHER_ERRORS+1
+        fi
         if echo "$line" | grep --silent 'Rebuild' ; then
           REBUILD_PROGRESS=`$MEGACLI -pdrbld -showprog -physdrv [$ENCLOSURE_ID:$SLOT] -a$ADAPTER | grep -o 'Completed [0-9]\+%'`
           line="$line ($REBUILD_PROGRESS)"
@@ -112,6 +128,11 @@ for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER | grep "Enclosure Device" | awk
           DISKREPORT="$DISKREPORT - `echo $line`"
         fi
       done < <(echo "$ERRORLINES")
+      if [ $NUMBER_OF_ERRORLINES -eq $NUMBER_OF_MEDIA_AND_OTHER_ERRORS ] ; then
+        ERRORSTATE=$STATE_WARNING
+      else
+        ERRORSTATE=$STATE_CRITICAL
+      fi
       if [ -z "$REPORT" ] ; then
         REPORT="$DISKREPORT"
       else
@@ -126,6 +147,11 @@ if [ -z "$REPORT" ] ; then
   echo "OK - System S/N=$SYSTEM_SN: no disk problems found."
   exit $STATE_OK
 else
-  echo -e "CRITICAL - System S/N=$SYSTEM_SN: ${LINEFEED}${REPORT}"
-  exit $STATE_CRITICAL
+  if [ $ERRORSTATE -eq $STATE_WARNING ] ; then
+    echo -e "WARNING - System S/N=$SYSTEM_SN: ${LINEFEED}${REPORT}"
+    exit $STATE_WARNING
+  else
+    echo -e "CRITICAL - System S/N=$SYSTEM_SN: ${LINEFEED}${REPORT}"
+    exit $STATE_CRITICAL
+  fi
 fi
