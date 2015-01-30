@@ -43,10 +43,10 @@ compare_versions() {
     fi
     # If one of the version numbers has less elements, assume zero.
     if [ -z "${version1[$i]}" ] ; then
-      {version1[$i]}=0
+      version1[$i]=0
     fi
     if [ -z "${version2[$i]}" ] ; then
-      {version2[$i]}=0
+      version2[$i]=0
     fi
     if [ "${version1[$i]}" -gt "${version2[$i]}" ] ; then
       test "$operator" = "$FIRST_BIGGER"
