@@ -1,10 +1,33 @@
 #!/bin/bash
-# Onno Zweers, 2011-10-13
 #
 # Description:
 #
 # This plugin checks if CRLs are still valid.
 #
+# Written by Onno Zweers
+# 2011-10-13 - Initial version - Onno
+# 2015-04-30 - Completely rewritten - Onno
+
+
+usage() {
+  command=$(basename $0)
+  echo 'This Nagios plugin checks whether (grid) certificates and their CRLs are still valid.'
+  echo
+  echo 'Usage:'
+  echo '  $command [options]'
+  echo
+  echo 'Options:'
+  echo '  -h, --help            Show this'
+  echo '  -r, --regex <regex>   Check only .pem files that match this regular expression.'
+  echo '                        Example: --regex "CERN|TERENA" '
+  echo '  -d, --dir <dir>       Specify cert dir (default /etc/grid-security/certificates)'
+  echo '  --warn-only           Only warn, never be critical'
+  echo '  --html                Use "<br>" as separator'
+  echo '  --dashes              Use " --- " as separator'
+  echo '  --debug               Provide debugging output'
+  echo
+}
+
 
 # Nagios return codes
 STATE_OK=0
@@ -21,80 +44,131 @@ PROGNAME=`basename $0`
 /usr/bin/which openssl 2>&1 1>/dev/null || exit $STATE_UNKNOWN
 
 
+# Default values
+debug=false
 CRLDIR="/etc/grid-security/certificates"
+REGEX="CERN|TERENA|Dutchgrid|DigiCert|COMODO|NIKHEF|GermanGrid|UKeScience"
+LINEFEED="\n"
+warn_only=false
 
-# Set defaults
-WARNING_HOURS=6
-CRITICAL_HOURS=2
 
 # Collect arguments
-while getopts w:c:s: OPT $@; do
-  case $OPT in
-    w) # warning if less then n days
-      WARNING_HOURS=$OPTARG
+while [ $# -gt 0 ] ; do
+  case "$1" in
+    -h | --help )
+      usage
+      exit $STATE_UNKNOWN
       ;;
-    c) # critical if less than n days
-      CRITICAL_HOURS=$OPTARG
+    -d | --dir )
+      [ -z "$2" ] && { usage ; exit $STATE_UNKNOWN ; }
+      CRLDIR="$2"
+      shift ; shift
       ;;
+    -r | --regex )
+      [ -z "$2" ] && { usage ; exit $STATE_UNKNOWN ; }
+      REGEX="$2"
+      shift ; shift
+      ;;
+    --html )
+      LINEFEED="<br>"
+      shift
+      ;;
+    --dashes )
+      LINEFEED=" --- "
+      shift
+      ;;
+    --warn-only )
+      warn_only=true
+      shift
+      ;;
+    --debug )
+      debug=true
+      shift
+      ;;
+    * )
+      echo "Unknown option $1."
+      exit $STATE_UNKNOWN
   esac
 done
-
-WARNING_SECONDS=$(($WARNING_HOURS * 3600))
-CRITICAL_SECONDS=$(($CRITICAL_HOURS * 3600))
-
 
 if [ ! -d "$CRLDIR" ] ; then
   echo "$CHECK_NAME UNKNOWN - CRL directory $CRLDIR not found."
   exit $STATE_UNKNOWN
 fi
 
-NOW=`date +%s`
+$debug && echo "Using directory $CRLDIR."
+cd "$CRLDIR"
+
+$debug && echo "Using regular expression '$REGEX'."
+
+
 CRITICAL=
 WARNING=
+NOW=`date +%s`
+REPORT=
 
-cd "$CRLDIR"
-for CRLFILE in *.r0 ; do
-  NEXTUPDATE_STRING=`openssl crl -in "$CRLFILE" -noout -nextupdate 2>&1 | sed -e 's/nextUpdate=//'`
-  NEXTUPDATE=`date +%s --date="$NEXTUPDATE_STRING" 2>&1`
-  # Format is seconds sinds epoch. So it must be a number.
-  if [[ ! "$NEXTUPDATE" =~ ^[0-9]+$ ]] ; then
-    echo "$CHECK_NAME UNKNOWN: Could not get end date of the CRL $CRLFILE: $CRLNEXTDATE $NEXTUPDATE"
-    exit $STATE_UNKNOWN
-  fi
-  SECONDS_LEFT=$(($NEXTUPDATE - $NOW))
-  # Determine status
-  if [ $SECONDS_LEFT -lt $CRITICAL_SECONDS ] ; then
-    CRITICAL=yes
-  fi
-  if [ $SECONDS_LEFT -lt $WARNING_SECONDS ] ; then
-    # Get the name of the CA from the ".0" symlink
-    CA_SYMLINK=`echo $CRLFILE | sed -e 's/\.r0/.0/'`
-    if [ -L "$CA_SYMLINK" ] ; then
-      CA=`stat --format=%N $CA_SYMLINK | sed -e 's/.*-> .//' -e 's/\.pem.*//'`
-      test -z "$CA" && CA="could not find CA name from symlink"
-    elif [ -f "$CA_SYMLINK" ] ; then
-      CA="related CA file is not a symlink"
+for cacert in $(ls -1 *.pem) ; do
+  if egrep --silent "$REGEX" <<<$cacert ; then
+    $debug && echo "Checking $cacert"
+    if ! openssl x509 -in $cacert -noout -checkend 0 ; then
+      REPORT="Root CA cert has expired for: $subject.$LINEFEED$REPORT"
+      $warn_only && WARNING=yes || CRITICAL=yes
+      $debug && echo "  Root CA cert invalid"
     else
-      CA="no related CA cert found"
+      $debug && echo "  Root CA cert OK"
     fi
-    WARNING=yes
-    if [ -z "$LIST" ] ; then
-      LIST="$CRLFILE ($CA) valid until $NEXTUPDATE_STRING"
+    subject=$(openssl x509 -in $cacert -noout -subject)
+    CRLFILE="$(openssl x509 -in $cacert -noout -hash).r0"
+    $debug && echo "  CRL file = '$CRLFILE'"
+    if [ ! -f "$CRLFILE" ] ; then
+      REPORT="CRL $CRLFILE not found for: $subject.$LINEFEED$REPORT"
+      $warn_only && WARNING=yes || CRITICAL=yes
+      $debug && echo "  CRL file $CRLFILE not found."
+    fi
+    LASTUPDATE_STRING=`openssl crl -in "$CRLFILE" -noout -lastupdate 2>&1 | sed -e 's/lastUpdate=//'`
+    LASTUPDATE=`date +%s --date="$LASTUPDATE_STRING" 2>&1`
+    NEXTUPDATE_STRING=`openssl crl -in "$CRLFILE" -noout -nextupdate 2>&1 | sed -e 's/nextUpdate=//'`
+    NEXTUPDATE=`date +%s --date="$NEXTUPDATE_STRING" 2>&1`
+    # Format is seconds sinds epoch. So it must be a number.
+    if [[ ! "$LASTUPDATE" =~ ^[0-9]+$ ]] ; then
+      echo "$CHECK_NAME UNKNOWN: Could not process start date of the CRL $CRLFILE: $LASTUPDATE_STRING."
+      exit $STATE_UNKNOWN
+    fi
+    if [[ ! "$NEXTUPDATE" =~ ^[0-9]+$ ]] ; then
+      echo "$CHECK_NAME UNKNOWN: Could not process end date of the CRL $CRLFILE: $NEXTUPDATE_STRING."
+      exit $STATE_UNKNOWN
+    fi
+    # Determine status
+    if [ $LASTUPDATE -gt $NOW ] ; then
+      REPORT="CRL $CRLFILE not yet valid for: $subject ($LASTUPDATE_STRING).$LINEFEED$REPORT"
+      $warn_only && WARNING=yes || CRITICAL=yes
+      $debug && echo "  CRL not yet valid ($LASTUPDATE_STRING)"
     else
-      LIST="$LIST; $CRLFILE ($CA) valid until $NEXTUPDATE_STRING"
+      $debug && echo "  CRL start date OK ($LASTUPDATE_STRING)"
     fi
+    if [ $NEXTUPDATE -lt $NOW ] ; then
+      REPORT="CRL $CRLFILE has expired for: $subject ($NEXTUPDATE_STRING).$LINEFEED$REPORT"
+      $warn_only && WARNING=yes || CRITICAL=yes
+      $debug && echo "  CRL has expired ($NEXTUPDATE_STRING)"
+    else
+      $debug && echo "  CRL end date OK ($NEXTUPDATE_STRING)"
+    fi
+  else
+    $debug && echo "Ignoring $cacert"
   fi
 done
 
+$debug && echo
+
 if [ "$CRITICAL" = "yes" ] ; then
-  echo "$CHECK_NAME CRITICAL - At least one CRL less than $CRITICAL_HOURS hours valid - $LIST"
+  echo -e -n "$REPORT"
   exit $STATE_CRITICAL
 fi
 
 if [ "$WARNING" = "yes" ] ; then
-  echo "$CHECK_NAME WARNING - At least one CRL less than $WARNING_HOURS hours valid - $LIST"
+  echo -e -n "$REPORT"
   exit $STATE_WARNING
 fi
 
-echo "$CHECK_NAME OK - CRLs in $CRLDIR are up to date."
+echo "$CHECK_NAME OK - CRLs in $CRLDIR matching '$REGEX' are up to date."
 exit $STATE_OK
