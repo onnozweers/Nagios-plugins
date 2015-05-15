@@ -7,6 +7,7 @@
 # Written by Onno Zweers
 # 2011-10-13 - Initial version - Onno
 # 2015-04-30 - Completely rewritten - Onno
+# 2015-05-15 - Added --xregex option - Onno
 
 
 usage() {
@@ -20,6 +21,8 @@ usage() {
   echo '  -h, --help            Show this'
   echo '  -r, --regex <regex>   Check only .pem files that match this regular expression.'
   echo '                        Example: --regex "CERN|TERENA" '
+  echo '  -x, --xregex <regex>  Exclude .pem files that match this regular expression.'
+  echo '                        If this is specified, --regex will be ignored.'
   echo '  -d, --dir <dir>       Specify cert dir (default /etc/grid-security/certificates)'
   echo '  --warn-only           Only warn, never be critical'
   echo '  --html                Use "<br>" as separator'
@@ -47,9 +50,11 @@ PROGNAME=`basename $0`
 # Default values
 debug=false
 CRLDIR="/etc/grid-security/certificates"
-REGEX="CERN|TERENA|Dutchgrid|DigiCert|COMODO|NIKHEF|GermanGrid|UKeScience"
+REGEX=".*"
+XREGEX=
 LINEFEED="\n"
 warn_only=false
+html=false
 
 
 # Collect arguments
@@ -69,8 +74,14 @@ while [ $# -gt 0 ] ; do
       REGEX="$2"
       shift ; shift
       ;;
+    -x | --xregex )
+      [ -z "$2" ] && { usage ; exit $STATE_UNKNOWN ; }
+      XREGEX="$2"
+      shift ; shift
+      ;;
     --html )
       LINEFEED="<br>"
+      html=true
       shift
       ;;
     --dashes )
@@ -99,76 +110,110 @@ fi
 $debug && echo "Using directory $CRLDIR."
 cd "$CRLDIR"
 
-$debug && echo "Using regular expression '$REGEX'."
+# If --xregex is specified, --regex will be ignored and set to '.*' (match all).
+if [ -n "$XREGEX" ] ; then
+  $debug && echo "Excluding certs with regular expression '$XREGEX'."
+  REGEX='.*'
+else
+  $debug && echo "Matching certs with regular expression '$REGEX'."
+fi
 
 
 CRITICAL=
 WARNING=
 NOW=`date +%s`
 REPORT=
+total=0
+checked=0
 
-for cacert in $(ls -1 *.pem) ; do
-  if egrep --silent "$REGEX" <<<$cacert ; then
-    $debug && echo "Checking $cacert"
-    if ! openssl x509 -in $cacert -noout -checkend 0 ; then
-      REPORT="Root CA cert has expired for: $subject.$LINEFEED$REPORT"
-      $warn_only && WARNING=yes || CRITICAL=yes
-      $debug && echo "  Root CA cert invalid"
+for cafile in $(ls -1 *.pem) ; do
+  total=$((total + 1))
+  if egrep --silent "$REGEX" <<<$cafile ; then
+    if [ -n "$XREGEX" ] && egrep --silent "$XREGEX" <<<$cafile ; then
+      $debug && echo "Ignoring $cafile"
     else
-      $debug && echo "  Root CA cert OK"
-    fi
-    subject=$(openssl x509 -in $cacert -noout -subject)
-    CRLFILE="$(openssl x509 -in $cacert -noout -hash).r0"
-    $debug && echo "  CRL file = '$CRLFILE'"
-    if [ ! -f "$CRLFILE" ] ; then
-      REPORT="CRL $CRLFILE not found for: $subject.$LINEFEED$REPORT"
-      $warn_only && WARNING=yes || CRITICAL=yes
-      $debug && echo "  CRL file $CRLFILE not found."
-    fi
-    LASTUPDATE_STRING=`openssl crl -in "$CRLFILE" -noout -lastupdate 2>&1 | sed -e 's/lastUpdate=//'`
-    LASTUPDATE=`date +%s --date="$LASTUPDATE_STRING" 2>&1`
-    NEXTUPDATE_STRING=`openssl crl -in "$CRLFILE" -noout -nextupdate 2>&1 | sed -e 's/nextUpdate=//'`
-    NEXTUPDATE=`date +%s --date="$NEXTUPDATE_STRING" 2>&1`
-    # Format is seconds sinds epoch. So it must be a number.
-    if [[ ! "$LASTUPDATE" =~ ^[0-9]+$ ]] ; then
-      echo "$CHECK_NAME UNKNOWN: Could not process start date of the CRL $CRLFILE: $LASTUPDATE_STRING."
-      exit $STATE_UNKNOWN
-    fi
-    if [[ ! "$NEXTUPDATE" =~ ^[0-9]+$ ]] ; then
-      echo "$CHECK_NAME UNKNOWN: Could not process end date of the CRL $CRLFILE: $NEXTUPDATE_STRING."
-      exit $STATE_UNKNOWN
-    fi
-    # Determine status
-    if [ $LASTUPDATE -gt $NOW ] ; then
-      REPORT="CRL $CRLFILE not yet valid for: $subject ($LASTUPDATE_STRING).$LINEFEED$REPORT"
-      $warn_only && WARNING=yes || CRITICAL=yes
-      $debug && echo "  CRL not yet valid ($LASTUPDATE_STRING)"
-    else
-      $debug && echo "  CRL start date OK ($LASTUPDATE_STRING)"
-    fi
-    if [ $NEXTUPDATE -lt $NOW ] ; then
-      REPORT="CRL $CRLFILE has expired for: $subject ($NEXTUPDATE_STRING).$LINEFEED$REPORT"
-      $warn_only && WARNING=yes || CRITICAL=yes
-      $debug && echo "  CRL has expired ($NEXTUPDATE_STRING)"
-    else
-      $debug && echo "  CRL end date OK ($NEXTUPDATE_STRING)"
+      $debug && echo "Checking $cafile"
+      checked=$((checked + 1))
+      if ! openssl x509 -in $cafile -noout -checkend 0 ; then
+        REPORT="Root CA cert has expired for: $cafile $subject.$LINEFEED$REPORT"
+        $warn_only && WARNING=yes || CRITICAL=yes
+        $debug && echo "  Root CA cert invalid"
+      else
+        $debug && echo "  Root CA cert OK"
+      fi
+      subject=$(openssl x509 -in $cafile -noout -subject)
+      CRLFILE="$(openssl x509 -in $cafile -noout -hash).r0"
+      $debug && echo "  CRL file = '$CRLFILE'"
+      if [ ! -f "$CRLFILE" ] ; then
+        REPORT="CRL $CRLFILE not found for: $cafile $subject.$LINEFEED$REPORT"
+        $warn_only && WARNING=yes || CRITICAL=yes
+        $debug && echo "  CRL file $CRLFILE not found."
+      fi
+      LASTUPDATE_STRING=$(openssl crl -in "$CRLFILE" -noout -lastupdate 2>&1 | sed -e 's/lastUpdate=//')
+      LASTUPDATE=$(date +%s --date="$LASTUPDATE_STRING" 2>&1)
+      NEXTUPDATE_STRING=$(openssl crl -in "$CRLFILE" -noout -nextupdate 2>&1 | sed -e 's/nextUpdate=//')
+      NEXTUPDATE=$(date +%s --date="$NEXTUPDATE_STRING" 2>&1)
+      # Format is seconds sinds epoch. So it must be a number.
+      if [[ ! "$LASTUPDATE" =~ ^[0-9]+$ ]] ; then
+        echo "$CHECK_NAME UNKNOWN: Could not process start date of the CRL $CRLFILE for $cafile: $LASTUPDATE_STRING."
+        exit $STATE_UNKNOWN
+      fi
+      if [[ ! "$NEXTUPDATE" =~ ^[0-9]+$ ]] ; then
+        echo "$CHECK_NAME UNKNOWN: Could not process end date of the CRL $CRLFILE for $cafile: $NEXTUPDATE_STRING."
+        exit $STATE_UNKNOWN
+      fi
+      # Determine status
+      if [ $LASTUPDATE -gt $NOW ] ; then
+        REPORT="CRL $CRLFILE not yet valid for: $cafile $subject ($LASTUPDATE_STRING).$LINEFEED$REPORT"
+        $warn_only && WARNING=yes || CRITICAL=yes
+        $debug && echo "  CRL not yet valid ($LASTUPDATE_STRING)"
+      else
+        $debug && echo "  CRL start date OK ($LASTUPDATE_STRING)"
+      fi
+      if [ $NEXTUPDATE -lt $NOW ] ; then
+        REPORT="CRL $CRLFILE has expired for: $cafile $subject ($NEXTUPDATE_STRING).$LINEFEED$REPORT"
+        $warn_only && WARNING=yes || CRITICAL=yes
+        $debug && echo "  CRL has expired ($NEXTUPDATE_STRING)"
+      else
+        $debug && echo "  CRL end date OK ($NEXTUPDATE_STRING)"
+      fi
     fi
   else
-    $debug && echo "Ignoring $cacert"
+    $debug && echo "Ignoring $cafile"
   fi
 done
 
 $debug && echo
 
+if [ -n "$XREGEX" ] ; then
+  EXTENDED_INFO="|Excluding regular expression: '$XREGEX'"
+else
+  EXTENDED_INFO="|Matching regular expression: '$REGEX'"
+fi
+
 if [ "$CRITICAL" = "yes" ] ; then
-  echo -e -n "$REPORT"
+  if $html ; then
+    echo -e -n "$CHECK_NAME CRITICAL - $REPORT" | sed -e "s/${LINEFEED}$//"
+    echo " - Checked $checked/$total. $EXTENDED_INFO"
+  else
+    echo -e -n "$CHECK_NAME CRITICAL - $REPORT - Checked $checked/$total."
+  fi
   exit $STATE_CRITICAL
 fi
 
 if [ "$WARNING" = "yes" ] ; then
-  echo -e -n "$REPORT"
+  if $html ; then
+    echo -e -n "$CHECK_NAME WARNING - $REPORT" | sed -e "s/${LINEFEED}$//"
+    echo " - Checked $checked/$total. $EXTENDED_INFO"
+  else
+    echo -e -n "$CHECK_NAME WARNING - $REPORT - Checked $checked/$total."
+  fi
   exit $STATE_WARNING
 fi
 
-echo "$CHECK_NAME OK - CRLs in $CRLDIR matching '$REGEX' are up to date."
+if $html ; then
+  echo "$CHECK_NAME OK - CRLs in $CRLDIR are up to date. Checked $checked/$total. $EXTENDED_INFO"
+else
+  echo "$CHECK_NAME OK - CRLs in $CRLDIR matching '$REGEX' are up to date. Checked $checked/$total. "
+fi
 exit $STATE_OK
