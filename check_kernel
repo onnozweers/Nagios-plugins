@@ -48,11 +48,11 @@ compare_versions() {
     if [ -z "${version2[$i]}" ] ; then
       version2[$i]=0
     fi
-    if [ "${version1[$i]}" -gt "${version2[$i]}" ] ; then
+    if [ "${version1[$i]//[_a-zA-Z]}" -gt "${version2[$i]//[_a-zA-Z]}" ] ; then
       test "$operator" = "$FIRST_BIGGER"
       return $?
     fi
-    if [ "${version1[$i]}" -lt "${version2[$i]}" ] ; then
+    if [ "${version1[$i]//[_a-zA-Z]}" -lt "${version2[$i]//[_a-zA-Z]}" ] ; then
       test "$operator" = "$SECOND_BIGGER"
       return $?
     fi
