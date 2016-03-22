@@ -1,6 +1,8 @@
 #!/bin/bash
 # Onno Zweers, 2011-10-04
 #
+# WARNING: Dell has hidden their support info behind a captcha, breaking this Nagios plugin.
+#
 # Description:
 #
 # This plugin checks how many days a Dell host is supported.
