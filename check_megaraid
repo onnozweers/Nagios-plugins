@@ -51,6 +51,8 @@ esac
 
 # Check if raid controller is offline
 
+Offline=$(dmesg|egrep -m 1 "rejecting I/O to offline device")
+
 if [[ $Offline == *"rejecting I/O to offline device"* ]] ; then
         echo "RAID Controller is offline"
         exit $STATE_CRITICAL
