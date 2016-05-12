@@ -13,6 +13,7 @@
 # 2014-04-14 - invokr - Fail when running as non-root user; no longer failing on drives marked as hotspare
 # 2014-08-20 - a-nldisr - Get S/N for Fujitsu systems.
 # 2014-08-25 - Onno - Added -NoLog to prevent /MegaSAS.log filling up partition. Thanks to Rogier for bug report.
+# 2016-05-12 - Eduardo - Check whether RAID controller is offline
 
 # Only runnable for root
 if [[ $EUID -ne 0 ]]; 
@@ -49,13 +50,10 @@ case "$1" in
     LINEFEED=" --- "
 esac
 
-# Check if raid controller is offline
-
-Offline=$(dmesg|egrep -m 1 "rejecting I/O to offline device")
-
-if [[ $Offline == *"rejecting I/O to offline device"* ]] ; then
-        echo "RAID Controller is offline"
-        exit $STATE_CRITICAL
+# Check whether RAID controller is offline
+if dmesg | egrep --silent 'rejecting I/O to offline device' ; then
+  echo 'RAID controller is offline'
+  exit $STATE_CRITICAL
 fi
 
 
