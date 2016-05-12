@@ -49,6 +49,14 @@ case "$1" in
     LINEFEED=" --- "
 esac
 
+# Check if raid controller is offline
+
+if [[ $Offline == *"rejecting I/O to offline device"* ]] ; then
+        echo "RAID Controller is offline"
+        exit $STATE_CRITICAL
+fi
+
+
 # ToDo: iterate over all available adapters. For now, assume there's only one.
 ADAPTER=0
 
