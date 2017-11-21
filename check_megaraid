@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Uses MegaCli to check the status of disks attached to an LSI controller.
-# Optional argument: [ --html | --newline ]
+# Optional argument: [ --html | --newline ] [ --skip-offline-check ] [ --disable-other-error-count ]
 # Bugs: this check will probably fail if you have more than one adapter in a host.
 # 2013-12-03 - Onno - Created.
 # 2013-12-05 - Onno - Added output format option.
@@ -14,6 +14,9 @@
 # 2014-08-20 - a-nldisr - Get S/N for Fujitsu systems.
 # 2014-08-25 - Onno - Added -NoLog to prevent /MegaSAS.log filling up partition. Thanks to Rogier for bug report.
 # 2016-05-12 - Eduardo - Check whether RAID controller is offline
+# 2017-11-21 - Svamberg - Add new option for skipping if is RAID controller offline
+# 2017-11-21 - Svamberg - Add JBOD to filter for Firmware state
+# 2017-11-21 - Svamberg - Add option to disable check of Other Error Count
 
 # Only runnable for root
 if [[ $EUID -ne 0 ]]; 
@@ -33,29 +36,42 @@ STATE_DEPENDENT=4
 
 # Check if binaries exist.
 /usr/bin/which dmidecode 2>&1 1>/dev/null || exit $STATE_UNKNOWN
-MEGACLI="/opt/MegaRAID/MegaCli/MegaCli64"
+
+MEGACLI=`which megacli` || `which MegaCli64` || "/opt/MegaRAID/MegaCli/MegaCli64"
+
 if [ ! -x "$MEGACLI" ] ; then
   echo "UNKNOWN: File $MEGACLI is not found or not executable."
   exit $STATE_UNKNOWN
 fi
 
-case "$1" in
-  "--html"|"-h")
-    LINEFEED="<br>"
-    ;;
-  "--newline"|"-n")
-    LINEFEED="\n"
-    ;;
-  *)
-    LINEFEED=" --- "
-esac
+OPT_SKIPOFFLINECHECK="0"
+OPT_DISABLEOTHERERRORCOUNT="0"
+for i in $@; do
+  case "$i" in
+    "--html"|"-h")
+      LINEFEED="<br>"
+      ;;
+    "--newline"|"-n")
+      LINEFEED="\n"
+      ;;
+    "--skip-offline-check")
+      OPT_SKIPOFFLINECHECK="1"
+      ;;
+    "--disable-other-error-count")
+      OPT_DISABLEOTHERERRORCOUNT="1"
+      ;;
+    *)
+      LINEFEED=" --- "
+  esac
+done
 
 # Check whether RAID controller is offline
-if dmesg | egrep --silent 'rejecting I/O to offline device' ; then
-  echo 'RAID controller is offline'
-  exit $STATE_CRITICAL
+if [  "$OPT_SKIPOFFLINECHECK" -eq "0" ]; then
+  if dmesg | egrep --silent 'rejecting I/O to offline device' ; then
+    echo 'RAID controller is offline'
+    exit $STATE_CRITICAL
+  fi
 fi
-
 
 # ToDo: iterate over all available adapters. For now, assume there's only one.
 ADAPTER=0
@@ -117,7 +133,13 @@ for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER -NoLog | grep "Enclosure Device
     else
       PREDICTIVE_FAILURE_REGEX=''
     fi
-    ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state:' | grep -v "Firmware state: Online\|Firmware state: Hotspare$PREDICTIVE_FAILURE_REGEX"`
+
+    if [ "$OPT_DISABLEOTHERERRORCOUNT" -eq "0" ] ; then
+      ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state:' | grep -v "Firmware state: Online\|Firmware state: JBOD\|Firmware state: Hotspare$PREDICTIVE_FAILURE_REGEX"`
+    else
+      ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state:' | grep -v "Firmware state: Online\|Firmware state: JBOD\|Firmware state: Hotspare$PREDICTIVE_FAILURE_REGEX\|Other Error Count:"`
+    fi
+    
     if [ -n "$ERRORLINES" ] ; then
       NUMBER_OF_MEDIA_AND_OTHER_ERRORS=0
       NUMBER_OF_ERRORLINES=0
