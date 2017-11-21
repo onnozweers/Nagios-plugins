@@ -15,6 +15,7 @@
 # 2014-08-25 - Onno - Added -NoLog to prevent /MegaSAS.log filling up partition. Thanks to Rogier for bug report.
 # 2016-05-12 - Eduardo - Check whether RAID controller is offline
 # 2017-11-21 - Svamberg - Add new option for skipping if is RAID controller offline
+# 2017-11-21 - Svamberg - Add JBOD to filter for Firmware state
 
 # Only runnable for root
 if [[ $EUID -ne 0 ]]; 
@@ -127,7 +128,7 @@ for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER -NoLog | grep "Enclosure Device
     else
       PREDICTIVE_FAILURE_REGEX=''
     fi
-    ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state:' | grep -v "Firmware state: Online\|Firmware state: Hotspare$PREDICTIVE_FAILURE_REGEX"`
+    ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state:' | grep -v "Firmware state: Online\|Firmware state: JBOD\|Firmware state: Hotspare$PREDICTIVE_FAILURE_REGEX"`
     if [ -n "$ERRORLINES" ] ; then
       NUMBER_OF_MEDIA_AND_OTHER_ERRORS=0
       NUMBER_OF_ERRORLINES=0
