@@ -44,6 +44,7 @@ if [ ! -x "$MEGACLI" ] ; then
 fi
 
 OPT_SKIPOFFLINECHECK="0"
+OPT_DISABLEOTHERERRORCOUNT="0"
 for i in $@; do
   case "$i" in
     "--html"|"-h")
@@ -54,6 +55,9 @@ for i in $@; do
       ;;
     "--skip-offline-check")
       OPT_SKIPOFFLINECHECK="1"
+      ;;
+    "--disable-other-error-count")
+      OPT_DISABLEOTHERERRORCOUNT="1"
       ;;
     *)
       LINEFEED=" --- "
@@ -128,7 +132,13 @@ for ENCLOSURE_ID in `$MEGACLI -PDList -a$ADAPTER -NoLog | grep "Enclosure Device
     else
       PREDICTIVE_FAILURE_REGEX=''
     fi
-    ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state:' | grep -v "Firmware state: Online\|Firmware state: JBOD\|Firmware state: Hotspare$PREDICTIVE_FAILURE_REGEX"`
+
+    if [ "$OPT_DISABLEOTHERERRORCOUNT" -eq "0" ] ; then
+      ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state:' | grep -v "Firmware state: Online\|Firmware state: JBOD\|Firmware state: Hotspare$PREDICTIVE_FAILURE_REGEX"`
+    else
+      ERRORLINES=`echo "$DISKINFO" | grep 'Count: [1-9]\|Firmware state:' | grep -v "Firmware state: Online\|Firmware state: JBOD\|Firmware state: Hotspare$PREDICTIVE_FAILURE_REGEX\|Other Error Count:"`
+    fi
+    
     if [ -n "$ERRORLINES" ] ; then
       NUMBER_OF_MEDIA_AND_OTHER_ERRORS=0
       NUMBER_OF_ERRORLINES=0
