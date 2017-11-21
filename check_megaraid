@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Uses MegaCli to check the status of disks attached to an LSI controller.
-# Optional argument: [ --html | --newline ] [ --skip-offline-check ]
+# Optional argument: [ --html | --newline ] [ --skip-offline-check ] [ --disable-other-error-count ]
 # Bugs: this check will probably fail if you have more than one adapter in a host.
 # 2013-12-03 - Onno - Created.
 # 2013-12-05 - Onno - Added output format option.
@@ -16,6 +16,7 @@
 # 2016-05-12 - Eduardo - Check whether RAID controller is offline
 # 2017-11-21 - Svamberg - Add new option for skipping if is RAID controller offline
 # 2017-11-21 - Svamberg - Add JBOD to filter for Firmware state
+# 2017-11-21 - Svamberg - Add option to disable check of Other Error Count
 
 # Only runnable for root
 if [[ $EUID -ne 0 ]]; 
