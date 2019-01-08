@@ -1,0 +1,37 @@
+Name:		nagios-plugins-weers
+Version:	{{version}}
+Release:	{{release}}%{?dist}
+Summary:	Collection of useful nagios plugins
+
+Group:		Applications/System
+License:	GLPv2
+URL:		https://github.com/onnozweers/Nagios-plugins
+Source0:	%{name}-%{version}.tar.bz2
+BuildRoot:	%{name}-%{version}-root
+BuildArch:	noarch
+
+Requires:	nagios
+
+%description
+
+Collection of nagios plugins
+
+%prep
+%setup -q
+
+%install
+rm -rf $RPM_BUILD_ROOT
+mkdir -p $RPM_BUILD_ROOT%{_libdir}/nagios/plugins
+install -m 555 check_* $RPM_BUILD_ROOT%{_libdir}/nagios/plugins
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%files
+%defattr(-,root,root,-)
+%{_libdir}/nagios/plugins/*
+
+%changelog
+* Tue Jan 8 2019  Marcin Trendota <marcin@trendota.com> - 0.0.1-1
+- First version
+
