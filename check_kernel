@@ -60,11 +60,11 @@ compare_versions() {
   done
 }
 
-RUNNING_KERNEL=`uname -r | sed 's/\.el[56].*//' | grep -o '[0-9].*[0-9]'`
+RUNNING_KERNEL=`uname -r | sed 's/\.el[567].*//' | grep -o '[0-9].*[0-9]'`
 INSTALLED_KERNELS=`rpm -qa | \
                grep '^kernel-\(lt-\)\{0,1\}[[:digit:]]' | \
                sed 's/\.x86_64.*//' | \
-               sed 's/\.el[56].*//' | \
+               sed 's/\.el[567].*//' | \
                grep -o '[0-9].*[0-9]' | \
                sort `
 
