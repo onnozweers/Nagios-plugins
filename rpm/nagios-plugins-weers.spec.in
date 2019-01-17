@@ -10,7 +10,7 @@ Source0:	%{name}-%{version}.tar.bz2
 BuildRoot:	%{name}-%{version}-root
 BuildArch:	noarch
 
-Requires:	nagios
+Requires:	nagios, yum-utils
 
 %description
 
@@ -32,6 +32,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/nagios/plugins/*
 
 %changelog
+* Thu Jan 17 2019  Marcin Trendota <marcin@trendota.com> - 0.0.2-3
+- First version
+
 * Tue Jan 8 2019  Marcin Trendota <marcin@trendota.com> - 0.0.1-1
 - First version
 

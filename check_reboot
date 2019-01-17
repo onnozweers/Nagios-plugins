@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# Written by Marcin Trendota
+
+# Nagios return codes
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+STATE_DEPENDENT=4
+
+OUTPUT=`needs-restarting -r 2>&1`
+RESULT=$?
+
+EXTRA_INFORMATION="Exit code: $RESULT"
+
+if [ "$RESULT" = "0" ] ; then
+    echo "OK - no reboot needed."
+    exit $STATE_OK
+else
+    LIST=`echo "$OUTPUT" | grep -- '->' | tr '\n' ' ' | awk '{$1=$1};1'`
+    if [ "$1" == "--only-warn" ] ; then
+        echo "WARNING - system needs to be rebooted. | $LIST --- $EXTRA_INFORMATION"
+        exit $STATE_WARNING
+    else
+        echo "CRITICAL - system needs to be rebooted. | $LIST --- $EXTRA_INFORMATION"
+        exit $STATE_CRITICAL
+    fi
+fi
