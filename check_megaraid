@@ -37,7 +37,7 @@ STATE_DEPENDENT=4
 # Check if binaries exist.
 /usr/bin/which dmidecode 2>&1 1>/dev/null || exit $STATE_UNKNOWN
 
-MEGACLI=`which megacli` || `which MegaCli64` || "/opt/MegaRAID/MegaCli/MegaCli64"
+MEGACLI=$(which megacli || which MegaCli64 || echo "/opt/MegaRAID/MegaCli/MegaCli64")
 
 if [ ! -x "$MEGACLI" ] ; then
   echo "UNKNOWN: File $MEGACLI is not found or not executable."
